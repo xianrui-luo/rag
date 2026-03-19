@@ -1,0 +1,7 @@
+chromadb>=0.5.5
+docx2txt>=0.8
+gradio>=4.44.0
+openai>=1.40.0
+pypdf>=4.3.0
+python-dotenv>=1.0.1
+sentence-transformers>=3.0.1
