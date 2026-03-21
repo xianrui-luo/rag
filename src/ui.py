@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List, Tuple
 
 import gradio as gr
@@ -15,6 +16,7 @@ def build_app() -> gr.Blocks:
     index_manager = IndexManager(settings)
     rag_service = RAGService(settings)
     meta_store = MetadataStore(settings.sqlite_path)
+    explorer_root = Path.home().resolve()
 
     def get_kb_choices() -> List[str]:
         kbs = meta_store.list_knowledge_bases()
@@ -98,6 +100,24 @@ def build_app() -> gr.Blocks:
         folder = kb["root_path"] if kb else ""
         return folder, get_kb_info(kb_name)
 
+    def on_folder_pick(selection: str | List[str] | None) -> Tuple[str, str]:
+        if not selection:
+            return "", "No folder selected / 未选择文件夹"
+
+        selected = selection[0] if isinstance(selection, list) else selection
+        selected_path = Path(selected)
+        if not selected_path.is_absolute():
+            selected_path = explorer_root / selected_path
+        selected_path = selected_path.resolve()
+
+        if selected_path.is_dir():
+            return str(selected_path), f"Selected folder / 已选择文件夹: {selected_path}"
+
+        return (
+            str(selected_path.parent),
+            f"Selected file, using parent folder / 选择的是文件，已自动使用其上级文件夹: {selected_path.parent}",
+        )
+
     with gr.Blocks(title="Folder RAG Local") as demo:
         gr.Markdown("# Folder RAG Local / 本地文件夹 RAG")
         gr.Markdown(
@@ -118,6 +138,22 @@ def build_app() -> gr.Blocks:
                     label="Folder Path / 文件夹路径",
                     placeholder="/path/to/your/documents",
                 )
+
+        gr.Markdown(
+            f"Browse local folders below and click one folder or file to fill the path box automatically. / 可在下方浏览本机文件，点击文件夹或文件后会自动填充路径。当前浏览根目录: `{explorer_root}`"
+        )
+        folder_picker = gr.FileExplorer(
+            label="Folder Browser / 文件浏览器",
+            root_dir=str(explorer_root),
+            glob="**/*",
+            file_count="single",
+            height=240,
+        )
+        folder_picker_status = gr.Textbox(
+            label="Browser Selection / 浏览器选择结果",
+            lines=2,
+            interactive=False,
+        )
 
         kb_info = gr.Textbox(label="KB Info / 知识库信息", lines=5, interactive=False)
 
@@ -148,6 +184,11 @@ def build_app() -> gr.Blocks:
         )
 
         kb_dropdown.change(on_kb_select, inputs=[kb_dropdown], outputs=[folder_path, kb_info])
+        folder_picker.change(
+            on_folder_pick,
+            inputs=[folder_picker],
+            outputs=[folder_path, folder_picker_status],
+        )
         refresh_button.click(
             refresh_index,
             inputs=[kb_dropdown, folder_path],
