@@ -10,6 +10,9 @@ Local folder-based RAG app with Gradio, Chroma, SQLite, local embeddings, and cl
 - Support incremental refresh for added, updated, and deleted files
 - Support full rebuild for a knowledge base
 - Use local embedding model via `sentence-transformers`
+- Add section-aware chunking for academic papers
+- Suppress reference sections during indexing by default
+- Combine vector retrieval, FTS/BM25 lexical retrieval, neighbor expansion, query rewriting, and reranking
 - Use OpenAI-compatible cloud API for answer generation
 - Provide Gradio UI for indexing and Q&A
 
@@ -17,6 +20,9 @@ Local folder-based RAG app with Gradio, Chroma, SQLite, local embeddings, and cl
 - 支持增量刷新，自动处理新增、修改、删除文件
 - 支持知识库完整重建
 - 使用 `sentence-transformers` 本地 embedding 模型
+- 针对学术论文增加章节感知分块
+- 默认抑制参考文献分块进入索引
+- 结合向量检索、FTS/BM25 词法检索、邻近块扩展、问题改写与重排
 - 使用 OpenAI 兼容云接口完成答案生成
 - 提供 Gradio 图形界面用于建库和问答
 
@@ -106,6 +112,48 @@ The launcher will:
 - 点击 `Refresh Index` 执行增量刷新
 - 点击 `Rebuild Index` 执行完整重建
 - 输入问题并查看引用到的分块来源
+
+## Academic Paper Mode / 学术论文模式
+
+- PDF papers are cleaned before chunking to reduce broken line joins and running headers
+- The chunker prefers section and paragraph boundaries, then falls back to sliding windows for long blocks
+- Reference sections are excluded by default to reduce noisy citations in retrieval
+- Retrieved sources now include section name and page range metadata
+- Follow-up questions can be rewritten into standalone retrieval queries before search
+- Top hits can pull same-section neighboring chunks into the final answer context
+- Lexical retrieval now uses SQLite FTS5 with BM25 scoring instead of full Python scans
+
+- PDF 论文在分块前会先做基础清洗，减少断行拼接和页眉干扰
+- 分块优先遵循章节和段落边界，过长文本再退回滑窗切分
+- 默认排除参考文献章节，减少检索时的引用噪声
+- 检索结果会展示章节名和页码范围
+- 连续追问会先被改写成独立检索问题，再进入检索流程
+- 命中的高相关块会补充同章节邻近块进入最终回答上下文
+- 词法检索已改为 SQLite FTS5 + BM25，不再做 Python 全量扫描
+
+## Retrieval Settings / 检索设置
+
+- `RERANKER_MODEL`: local reranker model name
+- `RETRIEVAL_CANDIDATES`: number of vector candidates before fusion
+- `LEXICAL_CANDIDATES`: number of lexical candidates before fusion
+- `HISTORY_TURNS`: number of recent dialogue turns used for query rewriting and answer generation
+- `MAX_CONTEXT_BLOCKS`: maximum number of final context blocks after neighbor expansion
+- `NEIGHBOR_EXPANSION_WINDOW`: how many same-section neighboring chunks to add around a hit
+- `ENABLE_HYBRID_RETRIEVAL`: enable vector + lexical fusion
+- `ENABLE_RERANKER`: enable local reranking
+- `ENABLE_QUERY_REWRITE`: rewrite follow-up questions into standalone retrieval queries
+- `EXCLUDE_REFERENCES`: skip references during indexing
+
+- `RERANKER_MODEL`：本地重排模型名称
+- `RETRIEVAL_CANDIDATES`：融合前的向量召回候选数
+- `LEXICAL_CANDIDATES`：融合前的词法召回候选数
+- `HISTORY_TURNS`：用于问题改写和回答生成的最近对话轮数
+- `MAX_CONTEXT_BLOCKS`：邻近扩展后最终送入回答阶段的上下文块上限
+- `NEIGHBOR_EXPANSION_WINDOW`：命中块两侧同章节邻近块的扩展窗口大小
+- `ENABLE_HYBRID_RETRIEVAL`：是否启用向量 + 词法融合
+- `ENABLE_RERANKER`：是否启用本地重排
+- `ENABLE_QUERY_REWRITE`：是否将追问改写成独立检索问题
+- `EXCLUDE_REFERENCES`：索引时是否排除参考文献
 
 ## Notes / 注意事项
 

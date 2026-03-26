@@ -49,6 +49,69 @@ class MetadataStore:
                 );
                 """
             )
+            conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                    chunk_id UNINDEXED,
+                    kb_name UNINDEXED,
+                    relative_path UNINDEXED,
+                    chunk_index UNINDEXED,
+                    section_title,
+                    section_path UNINDEXED,
+                    page_start UNINDEXED,
+                    page_end UNINDEXED,
+                    block_type UNINDEXED,
+                    paper_title,
+                    content,
+                    tokenize='unicode61'
+                )
+                """
+            )
+            existing_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(chunks)").fetchall()
+            }
+            for column_name, column_type in [
+                ("content", "TEXT"),
+                ("section_title", "TEXT"),
+                ("section_path", "TEXT"),
+                ("page_start", "INTEGER"),
+                ("page_end", "INTEGER"),
+                ("block_type", "TEXT"),
+                ("paper_title", "TEXT"),
+            ]:
+                if column_name not in existing_columns:
+                    conn.execute(f"ALTER TABLE chunks ADD COLUMN {column_name} {column_type}")
+            conn.execute("DELETE FROM chunks_fts")
+            conn.execute(
+                """
+                INSERT INTO chunks_fts (
+                    chunk_id,
+                    kb_name,
+                    relative_path,
+                    chunk_index,
+                    section_title,
+                    section_path,
+                    page_start,
+                    page_end,
+                    block_type,
+                    paper_title,
+                    content
+                )
+                SELECT
+                    chunk_id,
+                    kb_name,
+                    relative_path,
+                    chunk_index,
+                    COALESCE(section_title, ''),
+                    COALESCE(section_path, ''),
+                    COALESCE(page_start, ''),
+                    COALESCE(page_end, ''),
+                    COALESCE(block_type, ''),
+                    COALESCE(paper_title, ''),
+                    COALESCE(content, '')
+                FROM chunks
+                """
+            )
 
     def upsert_knowledge_base(
         self,
@@ -120,8 +183,21 @@ class MetadataStore:
             )
             conn.executemany(
                 """
-                INSERT INTO chunks (chunk_id, kb_name, relative_path, chunk_index, content_hash)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO chunks (
+                    chunk_id,
+                    kb_name,
+                    relative_path,
+                    chunk_index,
+                    content_hash,
+                    content,
+                    section_title,
+                    section_path,
+                    page_start,
+                    page_end,
+                    block_type,
+                    paper_title
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -130,6 +206,51 @@ class MetadataStore:
                         relative_path,
                         chunk["chunk_index"],
                         chunk["content_hash"],
+                        chunk["content"],
+                        chunk["section_title"],
+                        chunk["section_path"],
+                        chunk["page_start"],
+                        chunk["page_end"],
+                        chunk["block_type"],
+                        chunk["paper_title"],
+                    )
+                    for chunk in chunks
+                ],
+            )
+            conn.execute(
+                "DELETE FROM chunks_fts WHERE kb_name = ? AND relative_path = ?",
+                (kb_name, relative_path),
+            )
+            conn.executemany(
+                """
+                INSERT INTO chunks_fts (
+                    chunk_id,
+                    kb_name,
+                    relative_path,
+                    chunk_index,
+                    section_title,
+                    section_path,
+                    page_start,
+                    page_end,
+                    block_type,
+                    paper_title,
+                    content
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        chunk["chunk_id"],
+                        kb_name,
+                        relative_path,
+                        chunk["chunk_index"],
+                        chunk["section_title"],
+                        chunk["section_path"],
+                        chunk["page_start"],
+                        chunk["page_end"],
+                        chunk["block_type"],
+                        chunk["paper_title"],
+                        chunk["content"],
                     )
                     for chunk in chunks
                 ],
@@ -142,12 +263,17 @@ class MetadataStore:
                 (kb_name, relative_path),
             )
             conn.execute(
+                "DELETE FROM chunks_fts WHERE kb_name = ? AND relative_path = ?",
+                (kb_name, relative_path),
+            )
+            conn.execute(
                 "DELETE FROM files WHERE kb_name = ? AND relative_path = ?",
                 (kb_name, relative_path),
             )
 
     def delete_knowledge_base(self, kb_name: str) -> None:
         with self._connect() as conn:
+            conn.execute("DELETE FROM chunks_fts WHERE kb_name = ?", (kb_name,))
             conn.execute("DELETE FROM chunks WHERE kb_name = ?", (kb_name,))
             conn.execute("DELETE FROM files WHERE kb_name = ?", (kb_name,))
             conn.execute("DELETE FROM knowledge_bases WHERE name = ?", (kb_name,))
@@ -161,6 +287,76 @@ class MetadataStore:
                 "SELECT COUNT(*) FROM chunks WHERE kb_name = ?", (kb_name,)
             ).fetchone()[0]
         return {"file_count": file_count, "chunk_count": chunk_count}
+
+    def get_chunks(self, kb_name: str) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM chunks WHERE kb_name = ? ORDER BY relative_path, chunk_index",
+                (kb_name,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def search_chunks_fts(self, kb_name: str, match_query: str, limit: int) -> List[Dict[str, Any]]:
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT
+                        chunk_id,
+                        kb_name,
+                        relative_path,
+                        chunk_index,
+                        section_title,
+                        section_path,
+                        page_start,
+                        page_end,
+                        block_type,
+                        paper_title,
+                        content,
+                        bm25(chunks_fts, 0.0, 0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 1.2, 2.0) AS score
+                    FROM chunks_fts
+                    WHERE kb_name = ? AND chunks_fts MATCH ?
+                    ORDER BY score
+                    LIMIT ?
+                    """,
+                    (kb_name, match_query, limit),
+                ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [dict(row) for row in rows]
+
+    def get_neighbor_chunks(
+        self,
+        kb_name: str,
+        relative_path: str,
+        center_index: int,
+        section_title: str,
+        window: int,
+    ) -> List[Dict[str, Any]]:
+        if window <= 0:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM chunks
+                WHERE kb_name = ?
+                  AND relative_path = ?
+                  AND section_title = ?
+                  AND chunk_index BETWEEN ? AND ?
+                  AND chunk_index != ?
+                ORDER BY chunk_index
+                """,
+                (
+                    kb_name,
+                    relative_path,
+                    section_title,
+                    center_index - window,
+                    center_index + window,
+                    center_index,
+                ),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def list_knowledge_bases(self) -> List[Dict[str, Any]]:
         """Return all knowledge bases with their metadata."""

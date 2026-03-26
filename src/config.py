@@ -24,12 +24,28 @@ class Settings:
     openai_base_url: str
     openai_model: str
     embedding_model: str
+    reranker_model: str
     chroma_dir: Path
     sqlite_path: Path
     chunk_size: int
     chunk_overlap: int
     top_k: int
+    retrieval_candidates: int
+    lexical_candidates: int
+    history_turns: int
+    max_context_blocks: int
+    neighbor_expansion_window: int
+    enable_hybrid_retrieval: bool
+    enable_reranker: bool
+    enable_query_rewrite: bool
+    exclude_references: bool
     supported_extensions: tuple[str, ...]
+
+
+def _as_bool(value: str, default: bool) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_settings() -> Settings:
@@ -49,10 +65,20 @@ def get_settings() -> Settings:
         openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         embedding_model=os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5"),
+        reranker_model=os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3"),
         chroma_dir=chroma_dir,
         sqlite_path=sqlite_path,
         chunk_size=int(os.getenv("CHUNK_SIZE", "800")),
         chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "120")),
         top_k=int(os.getenv("TOP_K", "5")),
+        retrieval_candidates=int(os.getenv("RETRIEVAL_CANDIDATES", "20")),
+        lexical_candidates=int(os.getenv("LEXICAL_CANDIDATES", "20")),
+        history_turns=int(os.getenv("HISTORY_TURNS", "4")),
+        max_context_blocks=int(os.getenv("MAX_CONTEXT_BLOCKS", "8")),
+        neighbor_expansion_window=int(os.getenv("NEIGHBOR_EXPANSION_WINDOW", "1")),
+        enable_hybrid_retrieval=_as_bool(os.getenv("ENABLE_HYBRID_RETRIEVAL", "true"), True),
+        enable_reranker=_as_bool(os.getenv("ENABLE_RERANKER", "true"), True),
+        enable_query_rewrite=_as_bool(os.getenv("ENABLE_QUERY_REWRITE", "true"), True),
+        exclude_references=_as_bool(os.getenv("EXCLUDE_REFERENCES", "true"), True),
         supported_extensions=supported_extensions,
     )

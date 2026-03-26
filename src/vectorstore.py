@@ -46,3 +46,9 @@ class VectorStore:
             where={"kb_name": kb_name},
             include=["documents", "metadatas", "distances"],
         )
+
+    def get_chunks(self, kb_name: str) -> Dict[str, Any]:
+        return self._collection.get(
+            where={"kb_name": kb_name},
+            include=["documents", "metadatas"],
+        )

@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, TypedDict
 
-from src.chunking import chunk_text
+from src.chunking import chunk_document
 from src.config import Settings
 from src.embeddings import LocalEmbeddingService
-from src.loaders import load_text
+from src.loaders import load_document
 from src.metadata_store import MetadataStore
 from src.vectorstore import VectorStore
 
@@ -144,19 +144,25 @@ class IndexManager:
 
     def _index_file(self, kb_name: str, root: Path, relative_path: str, info: FileScanInfo) -> None:
         path = root / relative_path
-        text = load_text(path)
-        chunks = chunk_text(text, self.settings.chunk_size, self.settings.chunk_overlap)
+        document = load_document(path)
+        chunks = chunk_document(
+            document,
+            self.settings.chunk_size,
+            self.settings.chunk_overlap,
+            self.settings.exclude_references,
+        )
         if not chunks:
             raise ValueError("No readable text extracted")
 
-        embeddings = self.embeddings.embed_documents(chunks)
+        chunk_texts = [chunk.text for chunk in chunks]
+        embeddings = self.embeddings.embed_documents(chunk_texts)
         chunk_ids: List[str] = []
         metadatas = []
         chunk_rows = []
 
         file_hash = str(info["file_hash"])
         for index, chunk in enumerate(chunks):
-            content_hash = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+            content_hash = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
             chunk_id = hashlib.sha256(
                 f"{kb_name}:{relative_path}:{file_hash}:{index}".encode("utf-8")
             ).hexdigest()
@@ -168,6 +174,12 @@ class IndexManager:
                     "abs_path": str(path),
                     "file_hash": file_hash,
                     "chunk_index": index,
+                    "paper_title": chunk.paper_title,
+                    "section_title": chunk.section_title,
+                    "section_path": chunk.section_path,
+                    "page_start": chunk.page_start,
+                    "page_end": chunk.page_end,
+                    "block_type": chunk.block_type,
                 }
             )
             chunk_rows.append(
@@ -175,10 +187,17 @@ class IndexManager:
                     "chunk_id": chunk_id,
                     "chunk_index": index,
                     "content_hash": content_hash,
+                    "content": chunk.text,
+                    "section_title": chunk.section_title,
+                    "section_path": chunk.section_path,
+                    "page_start": chunk.page_start,
+                    "page_end": chunk.page_end,
+                    "block_type": chunk.block_type,
+                    "paper_title": chunk.paper_title,
                 }
             )
 
-        self.vectorstore.upsert_chunks(chunk_ids, chunks, embeddings, metadatas)
+        self.vectorstore.upsert_chunks(chunk_ids, chunk_texts, embeddings, metadatas)
         self.store.upsert_file(
             kb_name,
             relative_path,
