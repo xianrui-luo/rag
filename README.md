@@ -169,6 +169,6 @@ The launcher will:
 
 ## Optional Next Step / 可选后续
 
-If you later want a real Windows executable, you can package from the current `normal` environment with PyInstaller.
+If you later want a real Windows executable, you can package from the current environment with PyInstaller.
 
-如果你之后想要真正的 Windows 可执行文件，可以继续基于当前 `normal` 环境使用 PyInstaller 打包。
+如果你之后想要真正的 Windows 可执行文件，可以继续基于当前环境使用 PyInstaller 打包。
